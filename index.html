@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Shooter de Zombis</title>
+<style>
+  html,body{height:100%;margin:0;background:#111;overflow:hidden}
+  body{display:flex;justify-content:center;align-items:center}
+  #game{background:#222;display:block}
+</style>
+</head>
+<body>
+
+<canvas id="game" width="800" height="600"></canvas>
+
+<script>
+/*---------------  Constantes y variables globales ---------------*/
+const canvas = document.getElementById('game');
+const ctx     = canvas.getContext('2d');
+
+let keys       = {};          // Teclas presionadas
+let mouse      = {x:0,y:0};   // Posición relativa al canvas
+let mouseDown  = false;       // ¿Botón presionado?
+let showShop   = false;       // ¿Tienda abierta?
+
+/*----  Estado del jugador ----*/
+let score = 0, kills = 0;
+let player = {
+  x:canvas.width/2, y:canvas.height/2,
+  r:18,             // radio
+  speed:3,
+  damage:1,
+  vidas:3,
+  doubleGun:false,
+  immortal:0        // frames de invulnerabilidad
+};
+
+let bullets  = [];
+let enemies  = [];
+let lastShot = 0;            // ms
+const SHOT_DELAY = 150;      // ms entre disparos automáticos
+let enemyCap = 3;            // nº máximo simultáneo (crece hasta 10)
+
+/*---------------  Helpers ---------------*/
+function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+
+function spawnEnemy(isBoss=false){
+  // Posición aleatoria NUNCA dentro del centro visible inmediato
+  let ex = Math.random()*canvas.width;
+  let ey = Math.random()*canvas.height;
+  const dist = Math.hypot(ex-player.x, ey-player.y);
+  if(dist<150){               // si sale encima del jugador, lo alejamos
+    ex = (ex+200)%canvas.width;
+    ey = (ey+200)%canvas.height;
+  }
+
+  enemies.push({
+    x:ex, y:ey,
+    r: isBoss?40:20,
+    hp:isBoss? (20+Math.floor(kills/2)) : 4,
+    speed:isBoss?0.7:(1+Math.random()*0.5),
+    boss:isBoss
+  });
+}
+
+/*---------------  Entrada ---------------*/
+document.addEventListener('keydown',e=>{
+  if(e.key!=='F5') e.preventDefault();
+  keys[e.key.toLowerCase()]=true;
+  if(e.key==='t'||e.key==='T'){showShop=!showShop;}
+});
+document.addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=false;
+});
+canvas.addEventListener('mousedown',()=>mouseDown=true);
+canvas.addEventListener('mouseup',  ()=>mouseDown=false);
+canvas.addEventListener('mousemove',e=>{
+  const rect=canvas.getBoundingClientRect();
+  mouse.x=e.clientX-rect.left;
+  mouse.y=e.clientY-rect.top;
+});
+
+/*---------------  Disparo ---------------*/
+function tryShoot(){
+  if(Date.now()-lastShot<SHOT_DELAY) return;
+  lastShot=Date.now();
+  const angle=Math.atan2(mouse.y-player.y, mouse.x-player.x);
+  shootBullet(angle);
+  if(player.doubleGun){
+    const off=Math.PI/16;
+    shootBullet(angle+off);
+    shootBullet(angle-off);
+  }
+}
+function shootBullet(angle){
+  const speed=6;
+  bullets.push({
+    x:player.x, y:player.y,
+    dx:Math.cos(angle)*speed,
+    dy:Math.sin(angle)*speed
+  });
+}
+
+/*---------------  Lógica principal ---------------*/
+function update(){
+  /*--- movimiento jugador ---*/
+  const up=keys['w']||keys['arrowup'],
+        down=keys['s']||keys['arrowdown'],
+        left=keys['a']||keys['arrowleft'],
+        right=keys['d']||keys['arrowright'];
+
+  if(up)    player.y-=player.speed;
+  if(down)  player.y+=player.speed;
+  if(left)  player.x-=player.speed;
+  if(right) player.x+=player.speed;
+
+  // Mantener dentro del canvas
+  player.x=clamp(player.x, player.r, canvas.width - player.r);
+  player.y=clamp(player.y, player.r, canvas.height- player.r);
+
+  /*--- Disparo automático ---*/
+  if(mouseDown || keys[' ']) tryShoot();
+
+  /*--- Actualizar balas ---*/
+  bullets = bullets.filter(b=>{
+    b.x+=b.dx; b.y+=b.dy;
+    return b.x>-5&&b.x<canvas.width+5&&b.y>-5&&b.y<canvas.height+5;
+  });
+
+  /*--- Spawning de enemigos si faltan ---*/
+  while(enemies.length<enemyCap) spawnEnemy();
+
+  /*--- Colisiones y movimiento de enemigos ---*/
+  enemies.forEach((e,ei)=>{
+    // Movimiento simple hacia el jugador
+    const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy);
+    if(d>0){ e.x+=dx/d*e.speed; e.y+=dy/d*e.speed; }
+
+    // Golpe al jugador
+    if(d<e.r+player.r && player.immortal===0){
+      player.vidas--;
+      player.immortal=120; // 2 s a 60 FPS
+      if(player.vidas<=0){alert("¡GAME OVER!\nPuntos: "+score);location.reload();}
+    }
+
+    // Balas → enemigo
+    bullets.forEach((b,bi)=>{
+      if(Math.hypot(b.x-e.x, b.y-e.y)<e.r){
+        e.hp-=player.damage;
+        bullets.splice(bi,1);
+      }
+    });
+
+    // Muerte del enemigo
+    if(e.hp<=0){
+      enemies.splice(ei,1);
+      score+=e.boss?50:10;
+      kills++;
+
+      /*--- generar NUEVOS enemigos ---*/
+      // Cada baja genera 2 enemigos si aún no llegó al máximo (10)
+      const maxCap=10;
+      enemyCap=Math.min(maxCap, enemyCap+ (enemyCap<maxCap?1:0)); // subimos el cap 1 vez
+      let toSpawn = enemyCap - enemies.length;
+      if(enemyCap<maxCap) toSpawn++;          // duplicamos: mata 1 → +2 hasta 10
+      for(let n=0;n<toSpawn;n++) spawnEnemy();
+
+      /*--- jefe cada 20 bajas ---*/
+      if(kills%20===0){
+        spawnEnemy(true);
+      }
+    }
+  });
+
+  /*--- Estado de inmortalidad ---*/
+  if(player.immortal>0) player.immortal--;
+
+  /*--- Tienda (opcional con tecla T) ---*/
+  if(showShop){
+    if(keys['1']&&score>=100){player.speed+=0.5;score-=100;}
+    if(keys['2']&&score>=150){player.damage++;score-=150;}
+    if(keys['3']&&score>=200){player.vidas++;score-=200;}
+    if(keys['4']&&score>=250){player.immortal=600;score-=250;}
+    if(keys['5']&&score>=300){player.doubleGun=true;score-=300;}
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  /*--- Balas ---*/
+  ctx.fillStyle='#0ff';
+  bullets.forEach(b=>ctx.fillRect(b.x-3,b.y-3,6,6));
+
+  /*--- Jugador ---*/
+  ctx.fillStyle=player.immortal>0?'#ff0':'#fff';
+  ctx.beginPath();ctx.arc(player.x,player.y,player.r,0,Math.PI*2);ctx.fill();
+
+  /*--- Enemigos ---*/
+  enemies.forEach(e=>{
+    ctx.fillStyle=e.boss?'#800':'#0a0';
+    ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.fill();
+    // barra de vida
+    ctx.fillStyle='#f00';
+    ctx.fillRect(e.x-e.r, e.y-e.r-6, (e.hp/(e.boss?20+kills/2:4))*e.r*2, 4);
+  });
+
+  /*--- HUD ---*/
+  ctx.fillStyle='#fff';
+  ctx.font='16px Arial';
+  ctx.fillText(`Puntos: ${score}`,10,20);
+  ctx.fillText(`Vidas: ${player.vidas}`,10,40);
+  ctx.fillText(`Bajas: ${kills}`,10,60);
+
+  /*--- Tienda ---*/
+  if(showShop){
+    ctx.fillStyle='rgba(0,0,0,0.8)';
+    ctx.fillRect(100,100,600,400);
+    ctx.fillStyle='#fff';
+    ctx.font='28px Arial';
+    ctx.fillText(`TIENDA – Puntos: ${score}`,170,150);
+    ctx.font='22px Arial';
+    ctx.fillText('[1] Velocidad +0.5  (100)',140,220);
+    ctx.fillText('[2] Daño +1        (150)',140,260);
+    ctx.fillText('[3] Vida extra     (200)',140,300);
+    ctx.fillText('[4] Inmortal 10 s  (250)',140,340);
+    ctx.fillText('[5] Doble arma     (300)',140,380);
+    ctx.fillText('Pulsa T para cerrar',280,430);
+  }
+}
+
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/*---------------  Arranque ---------------*/
+for(let i=0;i<enemyCap;i++) spawnEnemy();
+loop();
+</script>
+</body>
+</html>
