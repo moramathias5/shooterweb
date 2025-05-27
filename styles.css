@@ -1,0 +1,47 @@
+body, html {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: Arial, sans-serif;
+}
+
+#gameCanvas {
+  display: block;
+  background: #222;
+  margin: 0 auto;
+  border: 2px solid #555;
+}
+
+.hidden {
+  display: none;
+}
+
+#shop, #devMenu {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.9);
+  border: 2px solid #666;
+  padding: 20px;
+  z-index: 100;
+  width: 300px;
+  text-align: center;
+  border-radius: 8px;
+  user-select: none;
+}
+
+#shop h2, #devMenu h2 {
+  margin-top: 0;
+}
+
+#shop ul {
+  list-style: none;
+  padding: 0;
+}
+
+#shop ul li {
+  margin: 8px 0;
+}
